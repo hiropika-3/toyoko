@@ -36,7 +36,7 @@
 1. リポジトリをクローンまたはダウンロードします。
 
 ```bash
-git clone https://github.com/yourusername/toyoko.git
+git clone https://github.com/hiropika-3/toyoko.git
 cd toyoko
 ```
 
