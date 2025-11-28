@@ -1,0 +1,43 @@
+episodes:
+  - id: modulation
+    title: "声の高低強弱大小‼️話し方の緩急間合余韻‼️でも大事 …"
+    url: "https://voicy.jp/channel/821920/7260595"
+    targets: ["抑揚", "間", "速さ"]
+    reason: "声の高低や強弱、話すスピードの緩急をつけて、聞き手を飽きさせないコツ。"
+
+  - id: emotion
+    title: "褒める言葉に真実を感じるか❓感情を乗せる声と話し方、さらに …"
+    url: "https://voicy.jp/channel/821920/7277852"
+    targets: ["抑揚", "明瞭さ"]
+    reason: "感情の乗せ方・言葉の『本音』の伝わり方が学べる人気回。"
+
+  - id: trust
+    title: "声と目に現れる人柄❓人を信用するか否か。耳を澄まして聴いてみよう"
+    url: "https://voicy.jp/channel/821920/7260324"
+    targets: ["明瞭さ"]
+    reason: "信頼される声の出し方、人柄が伝わる声の作り方。"
+
+  - id: humanity
+    title: "話し方には人間性が現れるってほんと❓"
+    url: "https://voicy.jp/channel/821920/7087678"
+    targets: ["明瞭さ", "間"]
+    reason: "自分らしさや人間味が伝わる話し方を磨ける回。"
+
+  - id: voice_color
+    title: "あなたの声の色を見つけよう❗️（2025年6月8日生放送）"
+    url: "https://voicy.jp/channel/821920/6788794"
+    targets: ["音量", "抑揚"]
+    reason: "声の『色』や個性を知って活かすためのヒント。"
+
+  - id: self_liking
+    title: "あなたは天才！〜初めての配信〜"
+    url: "https://voicy.jp/channel/821920/6761038"
+    targets: ["自信"]
+    reason: "自分の声に自信を持ちたいときに心が軽くなる回。"
+
+  - id: encourage
+    title: "8月嬉しかったこと✨生放送で。あなたは生きてるだけですごいのです✨✨"
+    url: "https://voicy.jp/channel/821920/7044292"
+    targets: ["自信", "モチベーション"]
+    reason: "少し落ち込んでいるときや頑張りたい日に聴くと、やさしく背中を押してくれます。"
+
