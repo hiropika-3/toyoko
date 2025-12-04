@@ -14,25 +14,35 @@ import ast
 
 from src.speech_analyzer import SpeechAnalyzer
 
-# ─────────────────────────────────────────────────────
-# （任意）LLM API 呼び出し（未設定なら無効）
-# ─────────────────────────────────────────────────────
-MYGPT_API_BASE = os.getenv("MYGPT_API_BASE", "").rstrip("/")
-MYGPT_API_KEY = os.getenv("MYGPT_API_KEY", "")
-MYGPT_MODEL_ID = os.getenv("MYGPT_MODEL_ID", "")
-
 # 詳細設定エリアをアプリケーション側で ON/OFF
 #  - DETAIL_PANEL_VISIBLE=1 で表示
 #  - 未設定 or 0 なら非表示（デフォルト）
 DETAIL_PANEL_VISIBLE = os.getenv("DETAIL_PANEL_VISIBLE", "0") == "1"
 
+# 音声特徴のうち「レーダーチャートで扱う5項目だけ」を抽出するための許可リスト
+ALLOWED_KEYS = {"速さ", "抑揚", "音量", "明瞭さ", "間"}
+
 # トヨコの追加フィードバック（ファイルがなければ非表示）
 TEMPLATES_PATH = os.getenv("ADVICE_TEMPLATES_PATH", "src/advice_templates.yaml")
 _TPL_CACHE = {"mtime": None, "data": None}
 
+# 安全な条件式評価（比較/論理/数値/識別子/括弧/四則のみ許可）
+_ALLOWED_NODES = {
+    ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare,
+    ast.Name, ast.Load, ast.Constant, ast.And, ast.Or,
+    ast.Gt, ast.GtE, ast.Lt, ast.LtE, ast.Eq, ast.NotEq,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow,
+    ast.USub, ast.UAdd,
+}
+
 # 今日のあなたにVoicyからに使うURLの一覧
 VOICY_YAML_PATH = os.getenv("VOICY_EPISODES_PATH", "src/voicy_episodes.yaml")
 _VOICY_CACHE = {"mtime": None, "episodes": []}
+
+# （任意）LLM API 呼び出し（未設定なら無効）
+MYGPT_API_BASE = os.getenv("MYGPT_API_BASE", "").rstrip("/")
+MYGPT_API_KEY = os.getenv("MYGPT_API_KEY", "")
+MYGPT_MODEL_ID = os.getenv("MYGPT_MODEL_ID", "")
 
 CUSTOM_CSS = """
     #rec-wrapper {
@@ -189,6 +199,22 @@ CUSTOM_CSS = """
         .mobile-menu {
             display: none !important;
         }
+    }
+
+    #banner-img {
+        width: 100%;
+        max-width: 300px;   /* PC の最大幅 */
+        display: block;
+        margin: 0 auto;     /* 中央寄せ */
+        border-radius: 12px;
+    }
+
+    .custom-video video {
+        width: 100% !important;
+        max-width: 500px !important;  /* PCでの最大幅 */
+        border-radius: 12px;
+        display: block;
+        margin: 0 auto;
     }
 """
 
@@ -369,6 +395,7 @@ def build_llm_prompts(metrics: dict) -> tuple[str, str]:
         "・短く要点的に（3〜6項目）\n"
         "・語尾は助言調で優しく「〜してみて」「〜してあげてね」など\n"
         "・具体的行動（例：キーワードの前で0.3秒だけ間を置いてみて など）\n\n"
+        "・最後に全体的な感想とポジティブなフィードバックを都代子節で長めの文章で面白おかしく補足してください\n\n"
         f"{json.dumps(metrics, ensure_ascii=False, indent=2)}"
     )
     return system, user
@@ -395,17 +422,6 @@ def load_templates_if_changed(path=TEMPLATES_PATH):
             _TPL_CACHE["mtime"] = None
             _TPL_CACHE["data"] = None
     return _TPL_CACHE["data"]
-
-
-# 安全な条件式評価（比較/論理/数値/識別子/括弧/四則のみ許可）
-_ALLOWED_NODES = {
-    ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare,
-    ast.Name, ast.Load, ast.Constant, ast.And, ast.Or,
-    ast.Gt, ast.GtE, ast.Lt, ast.LtE, ast.Eq, ast.NotEq,
-    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow,
-    ast.USub, ast.UAdd,
-}
-
 
 def _safe_eval_expr(expr: str, env: dict) -> bool:
     """astで構文木を検査し、許可ノードのみ評価"""
@@ -502,7 +518,13 @@ def build_graph_comments(
         except Exception:
             return 0.0
 
-    features = base_result.get("features", {}) or {}
+    #features = base_result.get("features", {}) or {}
+    # features からレーダーチャート対象だけを抜き出す
+    features = {
+        k: v
+        for k, v in (base_result.get("features", {}) or {}).items()
+        if k in ALLOWED_KEYS
+    }
     feats_scalar = {k: _scalar(v) for k, v in features.items()}
 
     # 強い項目・弱い項目をざっくり把握
@@ -567,13 +589,6 @@ def build_graph_comments(
 山がぐっと高くなっているところは、気持ちが前に出ているところ。  
 少し平らなところは、息を吸ったり、間を置いている部分と考えてくださいね。
 
-- ピーク: **{peak:.3f}**（1.0 に近いほど“しっかりめ”の声）
-- RMS: **{rms:.4f}**
-- dBFS: **{dbfs:.1f} dBFS**（0 に近いほど大きな音）
-- クリッピング率: **{clip_ratio*100:.2f} %**
-- 無音率: **{silence_ratio*100:.1f} %**
-- クレストファクタ: **{crest_factor:.2f}**（山の鋭さのイメージです）
-
 **トヨコのひとこと📝**  
 - 音量について：{loud_comment}  
 - 音割れについて：{clip_comment}  
@@ -601,7 +616,7 @@ def build_graph_comments(
     radar_md = (
         "### レーダーチャートの見方と、今回の強み\n\n"
         "「速さ」「抑揚」「音量」「明瞭さ」「間」など、"
-        "声の要素をまとめて見られるのがレーダーチャートです。\n"
+        "声の要素をまとめて見られるのがレーダーチャートです。\n\n"
         "外側に張り出しているほど、その項目が“よく出ている”イメージで見てくださいね。\n\n"
         "今回のあなたの傾向は…\n\n"
         + "\n".join(radar_lines)
@@ -974,7 +989,7 @@ def create_voice_analysis_app():
         bad = "\n".join([f"- {v}" for v in bad_list]) or "大きな課題は特にないかな。まずは気楽に、しゃべることを楽しんでみて。"
         adv = "\n".join([f"- {v}" for v in adv_list]) or "- 今日はまず『録ることに慣れる』を目標にしてみてね。"
 
-        summary_md = f"""# 声とことばラボ ✨
+        summary_md = f"""
 
 ## トヨコのひとこと総評 💌
 {fb.get("総合評価", "今日は声の調子を一緒にチェックしてみたよ。まずは録ってくれてありがとう！")}
@@ -996,17 +1011,16 @@ def create_voice_analysis_app():
 
 ---
 
-## 音量まわりの客観データ（原音ベース）
+## あなたの声を “数字で見える化”（原音ベース）
 「感覚」だけじゃなくて、「数字」で見るとこんな感じだよ。
 
 - ピーク: {peak:.3f}（1.0に近いとかなり大きめの声）
-- RMS: {rms:.4f}
+- RMS: {rms:.4f} (平均音量、0.03〜0.07 前後が長く聞いても疲れない音量感)
 - dBFS: {dbfs:.1f} dBFS（0が最大、-25〜-15 dBFSくらいが心地よい目安）
-- クリッピング率（しきい値 {clip_level:.3f}）: {clip_ratio*100:.2f} %
-- 無音率（しきい値 {silence_thresh:.3f}）: {silence_ratio*100:.1f} %
-- クレストファクタ: {crest_factor:.2f}
+- クリッピング率（しきい値 {clip_level:.3f}）: {clip_ratio*100:.2f} %（声が割れちゃった割合、0% に近いほど上手にコントロールできてる証拠）
+- 無音率（しきい値 {silence_thresh:.3f}）: {silence_ratio*100:.1f} %（間の多さ、一般的に 40〜70% くらいが“呼吸と間”のバランスが良い）
+- クレストファクタ: {crest_factor:.2f}（声の鋭さ、ふつうは 3〜15 あたり。20 を超えると山が鋭く、抑揚が強めの傾向）
 
-※ 難しい言葉もあるけど、「なんとなく声が大きすぎないかな？」「間はちゃんとあるかな？」を数字で支えてくれているイメージで見て。
 """
 
 #---
@@ -1089,21 +1103,30 @@ def create_voice_analysis_app():
 
     def append_llm_feedback(current_md, llm_state_str):
         """LLMで追加フィードバックを生成し追記（API未設定時はそのまま返す）"""
-        if not (MYGPT_API_BASE and MYGPT_API_KEY and MYGPT_MODEL_ID):
-            return current_md
+
+        # ★ ここで環境変数が空ならログに出して抜ける
+        #if not (MYGPT_API_BASE and MYGPT_API_KEY and MYGPT_MODEL_ID):
+        #    print("[DEBUG] LLM disabled because ENV is missing.")
+        #    return current_md
+
         try:
             metrics = json.loads(llm_state_str or "{}")
-        except Exception:
+        except Exception as e:
+            print("[DEBUG] json load error in append_llm_feedback:", e)
             metrics = {}
+
         system, user = build_llm_prompts(metrics)
         llm_text = call_mygpt(system, user, timeout=8.0)
+
         if not llm_text:
+            print("[DEBUG] LLM returned empty text.")
             return current_md
+
         section = f"""
 
 ---
 
-## 追加フィードバック（LLM）
+## 追加フィードバック（AI）
 {llm_text}
 """
         return current_md + section
@@ -1197,8 +1220,8 @@ def create_voice_analysis_app():
           </div>
 
           <div class="feature-card">
-            <h3>💗 トヨコAIのひとことアドバイス</h3>
-            <p>波形・レーダー・スペクトログラムを読み解いて、今日のあなたの声に合わせたフィードバックをトヨコAIが答えます。</p>
+            <h3>💗 トヨコのひとことアドバイス</h3>
+            <p>波形・レーダー・スペクトログラムを読み解いて、今日のあなたの声に合わせたフィードバックをトヨコアプリが答えます。</p>
           </div>
 
           <div class="feature-card">
@@ -1213,8 +1236,7 @@ def create_voice_analysis_app():
         # ─────────────────────────────
         # アプリ紹介セクション（ヒーロー）
         # ─────────────────────────────
-        gr.Markdown(
-            """
+        gr.Markdown("""
 # 声とことばラボとは？
 
 ねぇ、声ってね…  
@@ -1254,18 +1276,17 @@ def create_voice_analysis_app():
 声はね、あなたのいちばん素直なパートナーです。  
 今日のあなたの声が、少しでも軽やかに、心地よく響きますように。  
 さぁ、あなたの声、聴かせてくださいね。
-
-"""
-        )
+        """)
 
         # デモ動画（使い方イメージ）
         gr.Markdown("#### アプリ紹介動画（イメージ）🎬")
-        gr.Video(
-            value="assets/demo.mp4",  # 好きな動画ファイルに差し替えてください
-            label="デモ動画",
-            autoplay=False,
-            loop=True,
-        )
+        with gr.Column(elem_classes="custom-video"):
+            gr.Video(
+                value="assets/demo.mp4",  # 好きな動画ファイルに差し替えてください
+                label="デモ動画",
+                autoplay=False,
+                loop=True,
+            )
 
         gr.HTML('<div id="how-to-use">')
         # ─────────────────────────────
@@ -1360,11 +1381,11 @@ def create_voice_analysis_app():
 
         gr.HTML('</div>')
 
-        # GPTs ボタン（より目立たせたい場合）
-        gr.Button(
-            "📝 トヨコGPTsスピーチ相談室で『話したくなる文章』を作る",
-            link="https://chatgpt.com/g/g-68ca42c3955481918334f95460926b26-jin-sukuren-qian-tehua-sitakunaru-toyokonosuhitixiang-tan-shi",
-            variant="primary"
+        gr.Image(
+        value="assets/toyoko-gpts-banner.gif",
+        show_label=False,
+        interactive=False,
+        elem_id="banner-img"
         )
 
         # LLM状態（非表示）
