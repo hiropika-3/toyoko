@@ -11,8 +11,33 @@ import random
 import requests
 import yaml
 import ast
+import logging
+import os
 
 from src.speech_analyzer import SpeechAnalyzer
+from logging.handlers import RotatingFileHandler
+
+LOG_FILE = "access.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
+
+logger = logging.getLogger(__name__)
+
+def on_audio_change(audio, auto_tune, ui_silence_thresh, ui_clip_level,
+                    progress=gr.Progress(track_tqdm=False)):
+
+    logger.info("on_audio_change called. audio is %s", "None" if audio is None else "not None")
+
+    if audio is None:
+        logger.info("audio is None. returning early.")
+        ...
 
 # 詳細設定エリアをアプリケーション側で ON/OFF
 #  - DETAIL_PANEL_VISIBLE=1 で表示
@@ -215,6 +240,107 @@ CUSTOM_CSS = """
         border-radius: 12px;
         display: block;
         margin: 0 auto;
+    }
+
+    #intro-hero {
+      margin: 1.4rem 0 1.8rem;
+      padding: 1.8rem 1.6rem;
+      border-radius: 24px;
+      background: linear-gradient(135deg, #fff5f7 0%, #fffaf0 45%, #f3f8ff 100%);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.05);
+      border: 1px solid rgba(255, 183, 197, 0.7);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* ふわっとした飾りフレーム */
+    #intro-hero::before {
+      content: "";
+      position: absolute;
+      inset: -30%;
+      background:
+        radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.7), transparent 55%),
+        radial-gradient(circle at 100% 100%, rgba(255, 240, 245, 0.9), transparent 55%);
+      opacity: 0.8;
+      pointer-events: none;
+    }
+
+    /* 手紙風ヒーローセクション */
+    .letter-hero {
+      display: flex;
+      justify-content: center;
+      margin: 1.5rem 0 2.2rem;
+    }
+
+    .letter-paper {
+      position: relative;
+      max-width: 900px;
+      width: 100%;
+      padding: 2.2rem 2.6rem;
+      border-radius: 26px;
+      background: #f5fbff; /* 淡い水色ベース */
+      box-shadow: 0 8px 22px rgba(0, 80, 120, 0.12);
+      overflow: hidden;
+      font-family: "Hiragino Sans", "Yu Gothic", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* 便せんの罫線 */
+    .letter-paper::before {
+      content: "";
+      position: absolute;
+      inset: 18px 22px;
+      border-radius: 20px;
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          rgba(255, 255, 255, 0.0),
+          rgba(255, 255, 255, 0.0) 22px,
+          rgba(150, 195, 235, 0.25) 23px
+        );
+      opacity: 0.7;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .letter-inner {
+      position: relative;
+      z-index: 1;
+    }
+
+    .letter-label {
+      display: inline-block;
+      padding: 0.35rem 0.9rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.9);
+      color: #2f5b7a;
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.8rem;
+    }
+
+    .letter-title {
+      font-size: 1.8rem;
+      margin: 0 0 0.8rem;
+      color: #2f5b7a;
+    }
+
+    .letter-body {
+      font-size: 0.8rem;
+      line-height: 1.8;
+      color: #46606f;
+      white-space: pre-line; /* 改行をそのまま活かす */
+    }
+
+    .letter-body strong {
+      color: #e06c88;
+      font-weight: 700;
+    }
+
+    .letter-footer {
+      margin-top: 1.4rem;
+      font-size: 0.95rem;
+      color: #5b6c78;
+      text-align: right;
     }
 """
 
@@ -930,6 +1056,13 @@ def create_voice_analysis_app():
 
         # ---- 特徴抽出用に正規化コピー（解析の安定化）----
         x_for_features = (x_f32 / peak) if peak > 0 else x_f32
+
+        # ★ログ出力（負荷テスト・分析のため）
+        logger.info(
+            "analysis done: peak=%.3f, rms=%.4f, dbfs=%.1f, clip=%.3f, silence=%.3f",
+            peak, rms, dbfs, clip_ratio, silence_ratio,
+        )
+
         if len(x_for_features) > sr * 60:
             x_for_features = x_for_features[: sr * 60]
 
@@ -1165,7 +1298,7 @@ def create_voice_analysis_app():
 
     # ───────────── UI ─────────────
     with gr.Blocks(
-        title="下間都代子の声とことばラボ🎙✨",
+        title="下間都代子の声の解析アプリ🎙✨",
         theme=gr.themes.Soft(),
         analytics_enabled=False,
         css=CUSTOM_CSS,
@@ -1174,7 +1307,7 @@ def create_voice_analysis_app():
 
         with gr.Row():
           gr.Image(
-          value="assets/header.gif",
+          value="assets/header.jpg",
           show_label=False,
           interactive=False,
           elem_id="hero-image"
@@ -1190,7 +1323,7 @@ def create_voice_analysis_app():
 
     <!-- PC メニュー -->
     <div class="top-menu">
-        <a href="#introduction">声とことばラボとは</a>
+        <a href="#introduction">声の解析アプリとは</a>
         <a href="#how-to-use">使い方ガイド</a>
         <a href="#section-analyze">🎙 声を解析する</a>
         <a href="https://chatgpt.com/g/g-68ca42c3955481918334f95460926b26" target="_blank">
@@ -1200,7 +1333,7 @@ def create_voice_analysis_app():
 
     <!-- スマホメニュー -->
     <div class="mobile-menu">
-        <a href="#introduction">声とことばラボとは</a>
+        <a href="#introduction">声の解析アプリとは</a>
         <a href="#how-to-use">使い方ガイド</a>
         <a href="#section-analyze">🎙 声を解析する</a>
         <a href="https://chatgpt.com/g/g-68ca42c3955481918334f95460926b26" target="_blank">
@@ -1232,57 +1365,60 @@ def create_voice_analysis_app():
         </div>
         """)
 
-        gr.HTML('<div id="introduction">')
-        # ─────────────────────────────
-        # アプリ紹介セクション（ヒーロー）
-        # ─────────────────────────────
-        gr.Markdown("""
-# 声とことばラボとは？
+        gr.HTML("""
+<section id="introduction" class="letter-hero">
+  <div class="letter-paper">
+    <div class="letter-inner">
+      <h1 class="letter-title">声の解析アプリとは？</h1>
 
-ねぇ、声ってね…  
+      <div class="letter-body">
+ねぇ、声ってね…
 思っている以上に、その人の“いま”が出るんですよ。
 
-ちょっと疲れているときは、音が沈んだり。  
-ワクワクしている日は、声の粒が前のめりになったり。  
+ちょっと疲れているときは、音が沈んだり。
+ワクワクしている日は、声の粒が前のめりになったり。
 でもね、本人は案外、その変化に気づかないものなんです。
 
-声には人柄が現れて、話し方にはその人の人間性が現れます。  
-それくらい声って重要で正直なんですよね。  
-声を聴いただけでも  
-その人が本気で生きているかどうかがわかってしまうんです。  
+声には人柄が現れて、話し方にはその人の人間性が現れます。
+それくらい声って重要で正直なんですよね。
+声を聴いただけでも
+その人が本気で生きているかどうかがわかってしまうんです。
 
-このアプリはね、そんなあなたの声をそっと受け取って、  
-「ここね、すごくいいよ」  
-「ここを少し整えると、もっと伝わるね」  
-って、まるで横で話を聞きながらアドバイスするように、  
+このアプリはね、そんなあなたの声をそっと受け取って、
+「ここね、すごくいいよ」
+「ここを少し整えると、もっと伝わるね」
+って、まるで横で話を聞きながらアドバイスするように、
 やわらかくお伝えするためにつくりました。
 
-それともうひとつ。  
-話したいことがうまく言葉にならない日、ありますよね？  
+それともうひとつ。
+話したいことがうまく言葉にならない日、ありますよね？
 気持ちはあるのに、言葉が追いつかない日。
 
-そんなときは、  
-**“トヨコGPTs” があなたの気持ちをそっとすくって、  
-話したくなる文章に整えてくれます。**  
+そんなときは、
+<strong>“トヨコGPTs” があなたの気持ちをそっとすくって、
+話したくなる文章に整えてくれます。</strong>
 無理しなくて大丈夫。あなたのペースで、ね。
 
 
-- 🎙 マイクを押すだけで、いまの声をキャッチ  
-- 📊 波形やレーダーで“あなたの声の表情”が見える  
-- 💗 その日の声に合わせて、あなたへ贈りたい Voicy をセレクト  
+- 🎙 マイクを押すだけで、いまの声をキャッチ
+- 📊 波形やレーダーで“あなたの声の表情”が見える
+- 💗 その日の声に合わせて、あなたへ贈りたい Voicy をセレクト
 - ✍️ トヨコGPTs が、伝えたい想いを“やさしく言葉に”してくれる
 
-
-声はね、あなたのいちばん素直なパートナーです。  
-今日のあなたの声が、少しでも軽やかに、心地よく響きますように。  
+声はね、あなたのいちばん素直なパートナーです。
+今日のあなたの声が、少しでも軽やかに、心地よく響きますように。
 さぁ、あなたの声、聴かせてくださいね。
+      </div>
+    </div>
+  </div>
+</section>
         """)
 
         # デモ動画（使い方イメージ）
         gr.Markdown("#### アプリ紹介動画（イメージ）🎬")
         with gr.Column(elem_classes="custom-video"):
             gr.Video(
-                value="assets/demo.mp4",  # 好きな動画ファイルに差し替えてください
+                value="assets/demo.mov",  # 好きな動画ファイルに差し替えてください
                 label="デモ動画",
                 autoplay=False,
                 loop=True,
@@ -1382,11 +1518,30 @@ def create_voice_analysis_app():
         gr.HTML('</div>')
 
         gr.Image(
-        value="assets/toyoko-gpts-banner.gif",
+        value="assets/toyoko-gpts-banner.jpeg",
         show_label=False,
         interactive=False,
         elem_id="banner-img"
         )
+        gr.HTML("""
+<div style="text-align:center; margin-top:12px;">
+  <a href="https://chatgpt.com/g/g-68ca42c3955481918334f95460926b26" target="_blank"
+     style="
+       background:#f7d7c4;
+       padding:10px 20px;
+       border-radius:30px;
+       font-weight:700;
+       font-size:1.1rem;
+       color:#6A3A24;
+       text-decoration:none;
+       box-shadow:0 3px 6px rgba(0,0,0,0.1);
+       transition:0.2s;
+     "
+     onmouseover="this.style.background='#ffeadf'"
+     onmouseout="this.style.background='#f7d7c4'"
+  >💬 トヨコGPTsで文章づくり</a>
+</div>
+        """)
 
         # LLM状態（非表示）
         llm_state = gr.State("")
@@ -1438,6 +1593,8 @@ def create_voice_analysis_app():
             ],
         )
 
+        t0 = time.time()
+
         # 録音が変わったら：標準/テンプレ追記の解析を先に表示し、LLM入力をstateへ
         evt = audio.change(
             on_audio_change,
@@ -1457,6 +1614,8 @@ def create_voice_analysis_app():
             ],
             queue=True,
         )
+
+        logger.info("total_processing_time=%.2fs", time.time()-t0)
 
         # LLM 追記部分（ここはそのままで OK）
         evt.then(
