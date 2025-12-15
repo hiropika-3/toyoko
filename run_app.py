@@ -11,28 +11,63 @@ import random
 import requests
 import yaml
 import ast
+import logging
+import os
 
 from src.speech_analyzer import SpeechAnalyzer
+from logging.handlers import RotatingFileHandler
 
-# ─────────────────────────────────────────────────────
-# （任意）LLM API 呼び出し（未設定なら無効）
-# ─────────────────────────────────────────────────────
-MYGPT_API_BASE = os.getenv("MYGPT_API_BASE", "").rstrip("/")
-MYGPT_API_KEY = os.getenv("MYGPT_API_KEY", "")
-MYGPT_MODEL_ID = os.getenv("MYGPT_MODEL_ID", "")
+LOG_FILE = "access.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
+
+logger = logging.getLogger(__name__)
+
+def on_audio_change(audio, auto_tune, ui_silence_thresh, ui_clip_level,
+                    progress=gr.Progress(track_tqdm=False)):
+
+    logger.info("on_audio_change called. audio is %s", "None" if audio is None else "not None")
+
+    if audio is None:
+        logger.info("audio is None. returning early.")
+        ...
 
 # 詳細設定エリアをアプリケーション側で ON/OFF
 #  - DETAIL_PANEL_VISIBLE=1 で表示
 #  - 未設定 or 0 なら非表示（デフォルト）
 DETAIL_PANEL_VISIBLE = os.getenv("DETAIL_PANEL_VISIBLE", "0") == "1"
 
+# 音声特徴のうち「レーダーチャートで扱う5項目だけ」を抽出するための許可リスト
+ALLOWED_KEYS = {"速さ", "抑揚", "音量", "明瞭さ", "間"}
+
 # トヨコの追加フィードバック（ファイルがなければ非表示）
 TEMPLATES_PATH = os.getenv("ADVICE_TEMPLATES_PATH", "src/advice_templates.yaml")
 _TPL_CACHE = {"mtime": None, "data": None}
 
+# 安全な条件式評価（比較/論理/数値/識別子/括弧/四則のみ許可）
+_ALLOWED_NODES = {
+    ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare,
+    ast.Name, ast.Load, ast.Constant, ast.And, ast.Or,
+    ast.Gt, ast.GtE, ast.Lt, ast.LtE, ast.Eq, ast.NotEq,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow,
+    ast.USub, ast.UAdd,
+}
+
 # 今日のあなたにVoicyからに使うURLの一覧
 VOICY_YAML_PATH = os.getenv("VOICY_EPISODES_PATH", "src/voicy_episodes.yaml")
 _VOICY_CACHE = {"mtime": None, "episodes": []}
+
+# （任意）LLM API 呼び出し（未設定なら無効）
+MYGPT_API_BASE = os.getenv("MYGPT_API_BASE", "").rstrip("/")
+MYGPT_API_KEY = os.getenv("MYGPT_API_KEY", "")
+MYGPT_MODEL_ID = os.getenv("MYGPT_MODEL_ID", "")
 
 CUSTOM_CSS = """
     #rec-wrapper {
@@ -189,6 +224,123 @@ CUSTOM_CSS = """
         .mobile-menu {
             display: none !important;
         }
+    }
+
+    #banner-img {
+        width: 100%;
+        max-width: 300px;   /* PC の最大幅 */
+        display: block;
+        margin: 0 auto;     /* 中央寄せ */
+        border-radius: 12px;
+    }
+
+    .custom-video video {
+        width: 100% !important;
+        max-width: 500px !important;  /* PCでの最大幅 */
+        border-radius: 12px;
+        display: block;
+        margin: 0 auto;
+    }
+
+    #intro-hero {
+      margin: 1.4rem 0 1.8rem;
+      padding: 1.8rem 1.6rem;
+      border-radius: 24px;
+      background: linear-gradient(135deg, #fff5f7 0%, #fffaf0 45%, #f3f8ff 100%);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.05);
+      border: 1px solid rgba(255, 183, 197, 0.7);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* ふわっとした飾りフレーム */
+    #intro-hero::before {
+      content: "";
+      position: absolute;
+      inset: -30%;
+      background:
+        radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.7), transparent 55%),
+        radial-gradient(circle at 100% 100%, rgba(255, 240, 245, 0.9), transparent 55%);
+      opacity: 0.8;
+      pointer-events: none;
+    }
+
+    /* 手紙風ヒーローセクション */
+    .letter-hero {
+      display: flex;
+      justify-content: center;
+      margin: 1.5rem 0 2.2rem;
+    }
+
+    .letter-paper {
+      position: relative;
+      max-width: 900px;
+      width: 100%;
+      padding: 2.2rem 2.6rem;
+      border-radius: 26px;
+      background: #f5fbff; /* 淡い水色ベース */
+      box-shadow: 0 8px 22px rgba(0, 80, 120, 0.12);
+      overflow: hidden;
+      font-family: "Hiragino Sans", "Yu Gothic", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* 便せんの罫線 */
+    .letter-paper::before {
+      content: "";
+      position: absolute;
+      inset: 18px 22px;
+      border-radius: 20px;
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          rgba(255, 255, 255, 0.0),
+          rgba(255, 255, 255, 0.0) 22px,
+          rgba(150, 195, 235, 0.25) 23px
+        );
+      opacity: 0.7;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .letter-inner {
+      position: relative;
+      z-index: 1;
+    }
+
+    .letter-label {
+      display: inline-block;
+      padding: 0.35rem 0.9rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.9);
+      color: #2f5b7a;
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.8rem;
+    }
+
+    .letter-title {
+      font-size: 1.8rem;
+      margin: 0 0 0.8rem;
+      color: #2f5b7a;
+    }
+
+    .letter-body {
+      font-size: 0.8rem;
+      line-height: 1.8;
+      color: #46606f;
+      white-space: pre-line; /* 改行をそのまま活かす */
+    }
+
+    .letter-body strong {
+      color: #e06c88;
+      font-weight: 700;
+    }
+
+    .letter-footer {
+      margin-top: 1.4rem;
+      font-size: 0.95rem;
+      color: #5b6c78;
+      text-align: right;
     }
 """
 
@@ -369,6 +521,7 @@ def build_llm_prompts(metrics: dict) -> tuple[str, str]:
         "・短く要点的に（3〜6項目）\n"
         "・語尾は助言調で優しく「〜してみて」「〜してあげてね」など\n"
         "・具体的行動（例：キーワードの前で0.3秒だけ間を置いてみて など）\n\n"
+        "・最後に全体的な感想とポジティブなフィードバックを都代子節で長めの文章で面白おかしく補足してください\n\n"
         f"{json.dumps(metrics, ensure_ascii=False, indent=2)}"
     )
     return system, user
@@ -395,17 +548,6 @@ def load_templates_if_changed(path=TEMPLATES_PATH):
             _TPL_CACHE["mtime"] = None
             _TPL_CACHE["data"] = None
     return _TPL_CACHE["data"]
-
-
-# 安全な条件式評価（比較/論理/数値/識別子/括弧/四則のみ許可）
-_ALLOWED_NODES = {
-    ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare,
-    ast.Name, ast.Load, ast.Constant, ast.And, ast.Or,
-    ast.Gt, ast.GtE, ast.Lt, ast.LtE, ast.Eq, ast.NotEq,
-    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow,
-    ast.USub, ast.UAdd,
-}
-
 
 def _safe_eval_expr(expr: str, env: dict) -> bool:
     """astで構文木を検査し、許可ノードのみ評価"""
@@ -502,7 +644,13 @@ def build_graph_comments(
         except Exception:
             return 0.0
 
-    features = base_result.get("features", {}) or {}
+    #features = base_result.get("features", {}) or {}
+    # features からレーダーチャート対象だけを抜き出す
+    features = {
+        k: v
+        for k, v in (base_result.get("features", {}) or {}).items()
+        if k in ALLOWED_KEYS
+    }
     feats_scalar = {k: _scalar(v) for k, v in features.items()}
 
     # 強い項目・弱い項目をざっくり把握
@@ -567,13 +715,6 @@ def build_graph_comments(
 山がぐっと高くなっているところは、気持ちが前に出ているところ。  
 少し平らなところは、息を吸ったり、間を置いている部分と考えてくださいね。
 
-- ピーク: **{peak:.3f}**（1.0 に近いほど“しっかりめ”の声）
-- RMS: **{rms:.4f}**
-- dBFS: **{dbfs:.1f} dBFS**（0 に近いほど大きな音）
-- クリッピング率: **{clip_ratio*100:.2f} %**
-- 無音率: **{silence_ratio*100:.1f} %**
-- クレストファクタ: **{crest_factor:.2f}**（山の鋭さのイメージです）
-
 **トヨコのひとこと📝**  
 - 音量について：{loud_comment}  
 - 音割れについて：{clip_comment}  
@@ -601,7 +742,7 @@ def build_graph_comments(
     radar_md = (
         "### レーダーチャートの見方と、今回の強み\n\n"
         "「速さ」「抑揚」「音量」「明瞭さ」「間」など、"
-        "声の要素をまとめて見られるのがレーダーチャートです。\n"
+        "声の要素をまとめて見られるのがレーダーチャートです。\n\n"
         "外側に張り出しているほど、その項目が“よく出ている”イメージで見てくださいね。\n\n"
         "今回のあなたの傾向は…\n\n"
         + "\n".join(radar_lines)
@@ -915,6 +1056,13 @@ def create_voice_analysis_app():
 
         # ---- 特徴抽出用に正規化コピー（解析の安定化）----
         x_for_features = (x_f32 / peak) if peak > 0 else x_f32
+
+        # ★ログ出力（負荷テスト・分析のため）
+        logger.info(
+            "analysis done: peak=%.3f, rms=%.4f, dbfs=%.1f, clip=%.3f, silence=%.3f",
+            peak, rms, dbfs, clip_ratio, silence_ratio,
+        )
+
         if len(x_for_features) > sr * 60:
             x_for_features = x_for_features[: sr * 60]
 
@@ -974,7 +1122,7 @@ def create_voice_analysis_app():
         bad = "\n".join([f"- {v}" for v in bad_list]) or "大きな課題は特にないかな。まずは気楽に、しゃべることを楽しんでみて。"
         adv = "\n".join([f"- {v}" for v in adv_list]) or "- 今日はまず『録ることに慣れる』を目標にしてみてね。"
 
-        summary_md = f"""# 声とことばラボ ✨
+        summary_md = f"""
 
 ## トヨコのひとこと総評 💌
 {fb.get("総合評価", "今日は声の調子を一緒にチェックしてみたよ。まずは録ってくれてありがとう！")}
@@ -996,17 +1144,16 @@ def create_voice_analysis_app():
 
 ---
 
-## 音量まわりの客観データ（原音ベース）
+## あなたの声を “数字で見える化”（原音ベース）
 「感覚」だけじゃなくて、「数字」で見るとこんな感じだよ。
 
 - ピーク: {peak:.3f}（1.0に近いとかなり大きめの声）
-- RMS: {rms:.4f}
+- RMS: {rms:.4f} (平均音量、0.03〜0.07 前後が長く聞いても疲れない音量感)
 - dBFS: {dbfs:.1f} dBFS（0が最大、-25〜-15 dBFSくらいが心地よい目安）
-- クリッピング率（しきい値 {clip_level:.3f}）: {clip_ratio*100:.2f} %
-- 無音率（しきい値 {silence_thresh:.3f}）: {silence_ratio*100:.1f} %
-- クレストファクタ: {crest_factor:.2f}
+- クリッピング率（しきい値 {clip_level:.3f}）: {clip_ratio*100:.2f} %（声が割れちゃった割合、0% に近いほど上手にコントロールできてる証拠）
+- 無音率（しきい値 {silence_thresh:.3f}）: {silence_ratio*100:.1f} %（間の多さ、一般的に 40〜70% くらいが“呼吸と間”のバランスが良い）
+- クレストファクタ: {crest_factor:.2f}（声の鋭さ、ふつうは 3〜15 あたり。20 を超えると山が鋭く、抑揚が強めの傾向）
 
-※ 難しい言葉もあるけど、「なんとなく声が大きすぎないかな？」「間はちゃんとあるかな？」を数字で支えてくれているイメージで見て。
 """
 
 #---
@@ -1089,21 +1236,30 @@ def create_voice_analysis_app():
 
     def append_llm_feedback(current_md, llm_state_str):
         """LLMで追加フィードバックを生成し追記（API未設定時はそのまま返す）"""
-        if not (MYGPT_API_BASE and MYGPT_API_KEY and MYGPT_MODEL_ID):
-            return current_md
+
+        # ★ ここで環境変数が空ならログに出して抜ける
+        #if not (MYGPT_API_BASE and MYGPT_API_KEY and MYGPT_MODEL_ID):
+        #    print("[DEBUG] LLM disabled because ENV is missing.")
+        #    return current_md
+
         try:
             metrics = json.loads(llm_state_str or "{}")
-        except Exception:
+        except Exception as e:
+            print("[DEBUG] json load error in append_llm_feedback:", e)
             metrics = {}
+
         system, user = build_llm_prompts(metrics)
         llm_text = call_mygpt(system, user, timeout=8.0)
+
         if not llm_text:
+            print("[DEBUG] LLM returned empty text.")
             return current_md
+
         section = f"""
 
 ---
 
-## 追加フィードバック（LLM）
+## 追加フィードバック（AI）
 {llm_text}
 """
         return current_md + section
@@ -1142,7 +1298,7 @@ def create_voice_analysis_app():
 
     # ───────────── UI ─────────────
     with gr.Blocks(
-        title="下間都代子の声とことばラボ🎙✨",
+        title="下間都代子の声の解析アプリ🎙✨",
         theme=gr.themes.Soft(),
         analytics_enabled=False,
         css=CUSTOM_CSS,
@@ -1151,7 +1307,7 @@ def create_voice_analysis_app():
 
         with gr.Row():
           gr.Image(
-          value="assets/header.gif",
+          value="assets/header.jpg",
           show_label=False,
           interactive=False,
           elem_id="hero-image"
@@ -1167,7 +1323,7 @@ def create_voice_analysis_app():
 
     <!-- PC メニュー -->
     <div class="top-menu">
-        <a href="#introduction">声とことばラボとは</a>
+        <a href="#introduction">声の解析アプリとは</a>
         <a href="#how-to-use">使い方ガイド</a>
         <a href="#section-analyze">🎙 声を解析する</a>
         <a href="https://chatgpt.com/g/g-68ca42c3955481918334f95460926b26" target="_blank">
@@ -1177,7 +1333,7 @@ def create_voice_analysis_app():
 
     <!-- スマホメニュー -->
     <div class="mobile-menu">
-        <a href="#introduction">声とことばラボとは</a>
+        <a href="#introduction">声の解析アプリとは</a>
         <a href="#how-to-use">使い方ガイド</a>
         <a href="#section-analyze">🎙 声を解析する</a>
         <a href="https://chatgpt.com/g/g-68ca42c3955481918334f95460926b26" target="_blank">
@@ -1197,8 +1353,8 @@ def create_voice_analysis_app():
           </div>
 
           <div class="feature-card">
-            <h3>💗 トヨコAIのひとことアドバイス</h3>
-            <p>波形・レーダー・スペクトログラムを読み解いて、今日のあなたの声に合わせたフィードバックをトヨコAIが答えます。</p>
+            <h3>💗 トヨコのひとことアドバイス</h3>
+            <p>波形・レーダー・スペクトログラムを読み解いて、今日のあなたの声に合わせたフィードバックをトヨコアプリが答えます。</p>
           </div>
 
           <div class="feature-card">
@@ -1209,63 +1365,64 @@ def create_voice_analysis_app():
         </div>
         """)
 
-        gr.HTML('<div id="introduction">')
-        # ─────────────────────────────
-        # アプリ紹介セクション（ヒーロー）
-        # ─────────────────────────────
-        gr.Markdown(
-            """
-# 声とことばラボとは？
+        gr.HTML("""
+<section id="introduction" class="letter-hero">
+  <div class="letter-paper">
+    <div class="letter-inner">
+      <h1 class="letter-title">声の解析アプリとは？</h1>
 
-ねぇ、声ってね…  
+      <div class="letter-body">
+ねぇ、声ってね…
 思っている以上に、その人の“いま”が出るんですよ。
 
-ちょっと疲れているときは、音が沈んだり。  
-ワクワクしている日は、声の粒が前のめりになったり。  
+ちょっと疲れているときは、音が沈んだり。
+ワクワクしている日は、声の粒が前のめりになったり。
 でもね、本人は案外、その変化に気づかないものなんです。
 
-声には人柄が現れて、話し方にはその人の人間性が現れます。  
-それくらい声って重要で正直なんですよね。  
-声を聴いただけでも  
-その人が本気で生きているかどうかがわかってしまうんです。  
+声には人柄が現れて、話し方にはその人の人間性が現れます。
+それくらい声って重要で正直なんですよね。
+声を聴いただけでも
+その人が本気で生きているかどうかがわかってしまうんです。
 
-このアプリはね、そんなあなたの声をそっと受け取って、  
-「ここね、すごくいいよ」  
-「ここを少し整えると、もっと伝わるね」  
-って、まるで横で話を聞きながらアドバイスするように、  
+このアプリはね、そんなあなたの声をそっと受け取って、
+「ここね、すごくいいよ」
+「ここを少し整えると、もっと伝わるね」
+って、まるで横で話を聞きながらアドバイスするように、
 やわらかくお伝えするためにつくりました。
 
-それともうひとつ。  
-話したいことがうまく言葉にならない日、ありますよね？  
+それともうひとつ。
+話したいことがうまく言葉にならない日、ありますよね？
 気持ちはあるのに、言葉が追いつかない日。
 
-そんなときは、  
-**“トヨコGPTs” があなたの気持ちをそっとすくって、  
-話したくなる文章に整えてくれます。**  
+そんなときは、
+<strong>“トヨコGPTs” があなたの気持ちをそっとすくって、
+話したくなる文章に整えてくれます。</strong>
 無理しなくて大丈夫。あなたのペースで、ね。
 
 
-- 🎙 マイクを押すだけで、いまの声をキャッチ  
-- 📊 波形やレーダーで“あなたの声の表情”が見える  
-- 💗 その日の声に合わせて、あなたへ贈りたい Voicy をセレクト  
+- 🎙 マイクを押すだけで、いまの声をキャッチ
+- 📊 波形やレーダーで“あなたの声の表情”が見える
+- 💗 その日の声に合わせて、あなたへ贈りたい Voicy をセレクト
 - ✍️ トヨコGPTs が、伝えたい想いを“やさしく言葉に”してくれる
 
-
-声はね、あなたのいちばん素直なパートナーです。  
-今日のあなたの声が、少しでも軽やかに、心地よく響きますように。  
+声はね、あなたのいちばん素直なパートナーです。
+今日のあなたの声が、少しでも軽やかに、心地よく響きますように。
 さぁ、あなたの声、聴かせてくださいね。
-
-"""
-        )
+      </div>
+    </div>
+  </div>
+</section>
+        """)
 
         # デモ動画（使い方イメージ）
         gr.Markdown("#### アプリ紹介動画（イメージ）🎬")
-        gr.Video(
-            value="assets/demo.mp4",  # 好きな動画ファイルに差し替えてください
-            label="デモ動画",
-            autoplay=False,
-            loop=True,
-        )
+        with gr.Column(elem_classes="custom-video"):
+            gr.Video(
+                value="assets/demo.mov",  # 好きな動画ファイルに差し替えてください
+                label="デモ動画",
+                autoplay=False,
+                loop=True,
+            )
 
         gr.HTML('<div id="how-to-use">')
         # ─────────────────────────────
@@ -1360,12 +1517,31 @@ def create_voice_analysis_app():
 
         gr.HTML('</div>')
 
-        # GPTs ボタン（より目立たせたい場合）
-        gr.Button(
-            "📝 トヨコGPTsスピーチ相談室で『話したくなる文章』を作る",
-            link="https://chatgpt.com/g/g-68ca42c3955481918334f95460926b26-jin-sukuren-qian-tehua-sitakunaru-toyokonosuhitixiang-tan-shi",
-            variant="primary"
+        gr.Image(
+        value="assets/toyoko-gpts-banner.jpeg",
+        show_label=False,
+        interactive=False,
+        elem_id="banner-img"
         )
+        gr.HTML("""
+<div style="text-align:center; margin-top:12px;">
+  <a href="https://chatgpt.com/g/g-68ca42c3955481918334f95460926b26" target="_blank"
+     style="
+       background:#f7d7c4;
+       padding:10px 20px;
+       border-radius:30px;
+       font-weight:700;
+       font-size:1.1rem;
+       color:#6A3A24;
+       text-decoration:none;
+       box-shadow:0 3px 6px rgba(0,0,0,0.1);
+       transition:0.2s;
+     "
+     onmouseover="this.style.background='#ffeadf'"
+     onmouseout="this.style.background='#f7d7c4'"
+  >💬 トヨコGPTsで文章づくり</a>
+</div>
+        """)
 
         # LLM状態（非表示）
         llm_state = gr.State("")
@@ -1417,6 +1593,8 @@ def create_voice_analysis_app():
             ],
         )
 
+        t0 = time.time()
+
         # 録音が変わったら：標準/テンプレ追記の解析を先に表示し、LLM入力をstateへ
         evt = audio.change(
             on_audio_change,
@@ -1436,6 +1614,8 @@ def create_voice_analysis_app():
             ],
             queue=True,
         )
+
+        logger.info("total_processing_time=%.2fs", time.time()-t0)
 
         # LLM 追記部分（ここはそのままで OK）
         evt.then(

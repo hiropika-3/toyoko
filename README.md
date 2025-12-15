@@ -72,8 +72,6 @@ python run_app.py
 
 ```
 .
-├── docs/
-│   └── design.md      # 設計書
 ├── src/
 │   ├── __init__.py
 │   └── speech_analyzer.py  # 音声解析モジュール
